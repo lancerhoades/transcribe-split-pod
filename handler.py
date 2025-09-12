@@ -1,3 +1,4 @@
+import shutil
 import os
 import json
 import subprocess
@@ -7,6 +8,16 @@ from typing import Dict, Any, List, Optional
 
 import runpod
 from rapidfuzz import fuzz
+
+# --- GPU diag ---
+def _log_gpu_info():
+    try:
+        out = subprocess.check_output(["nvidia-smi"], text=True)
+        print("[GPU] nvidia-smi available.\n" + out)
+    except Exception as e:
+        print(f"[GPU] nvidia-smi not available: {e}")
+
+
 
 # ----------- Config / Defaults -----------
 DEFAULT_LANGUAGE = os.getenv("TRANSCRIBE_LANG", "en")
@@ -240,3 +251,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
 
 # RunPod glue
 runpod.serverless.start({"handler": handler})
+
+# Log GPU info at import
+_log_gpu_info()
+
