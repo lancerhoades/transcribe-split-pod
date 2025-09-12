@@ -17,3 +17,4 @@ COPY handler.py .
 ENV PYTHONUNBUFFERED=1
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "-u", "handler.py"]
+# FORCE REBUILD Fri Sep 12 15:14:08 UTC 2025
