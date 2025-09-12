@@ -14,7 +14,7 @@ DEFAULT_MODEL_SIZE = os.getenv("WHISPER_MODEL_SIZE", "medium")  # base|small|med
 DEFAULT_SPLIT_PHRASE = os.getenv("SPLIT_PHRASE_DEFAULT", "sermon")
 DEFAULT_ANNOUNCEMENTS_PHRASE = os.getenv("ANNOUNCEMENTS_PHRASE_DEFAULT", "")
 
-STORAGE_ROOT = "/storage"  # RunPod NAS mount
+STORAGE_ROOT = "/runpod-volume"  # RunPod NAS mount
 
 # ----------- Utilities -----------
 def ensure_dir(path: str):
@@ -148,7 +148,7 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     Input:
       {
         "job_id": "20250911-120000-abc123-video42",
-        "local_video_path": "/storage/{job_id}/raw/full.mp4",  # optional
+        "local_video_path": "/runpod-volume/{job_id}/raw/full.mp4",  # optional
         "input_url": "https://....mp4",                        # optional
         "language": "en",                                      # optional
         "split_phrase": "today we begin our sermon",           # optional
