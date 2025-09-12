@@ -19,3 +19,5 @@ COPY handler.py .
 ENV PYTHONUNBUFFERED=1
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "-u", "handler.py"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["python", "-u", "handler.py"]
