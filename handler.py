@@ -86,6 +86,7 @@ def do_transcribe(input_path: str, language: str) -> Dict[str, Any]:
     device = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES") not in (None, "", "-1") else "cpu"
     compute_type = "float16" if device == "cuda" else "int8"  # good defaults
     model_size = DEFAULT_MODEL_SIZE
+    print(f"[WHISPER] device={device} compute_type={compute_type} CUDA_VISIBLE_DEVICES={os.getenv("CUDA_VISIBLE_DEVICES")}", flush=True)
 
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
     segments_it, _info = model.transcribe(
@@ -155,6 +156,7 @@ def find_phrase_time(segments: List[Dict[str, Any]], phrase: str, min_ratio: flo
 
 # ----------- Main Handler -----------
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
+    _log_gpu_info()
     """
     Input:
       {
