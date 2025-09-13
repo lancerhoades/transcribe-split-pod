@@ -10,6 +10,10 @@ import runpod
 from rapidfuzz import fuzz
 from openai import OpenAI
 
+def _val(obj, key, default=None):
+    return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
+
+
 # ---------- Config / Defaults ----------
 DEFAULT_LANGUAGE = os.getenv("TRANSCRIBE_LANG", "en")
 DEFAULT_SPLIT_PHRASE = os.getenv("SPLIT_PHRASE_DEFAULT", "sermon")
@@ -125,14 +129,14 @@ def transcribe_chunk_openai(file_path: str, offset: float, language: str) -> Dic
             language=language,
             timestamp_granularities=["segment", "word"]
         )
-    text = (getattr(tr, "text", None) or tr.get("text") or "").strip()
-    raw_segments = getattr(tr, "segments", None) or tr.get("segments") or []
+    text = (_val(tr, "text", "") or "").strip()
+    raw_segments = _val(tr, "segments", []) or []
     segs = []
     if raw_segments:
         for s in raw_segments:
-            s_start = float(s.get("start", 0.0)) + offset
-            s_end = float(s.get("end", 0.0)) + offset
-            s_text = (s.get("text") or "").strip()
+            s_start = float(_val(s, "start", 0.0)) + offset
+            s_end = float(_val(s, "end", 0.0)) + offset
+            s_text = (_val(s, "text", "") or "").strip()
             segs.append({"id": 0, "start": s_start, "end": s_end, "text": s_text})
     else:
         segs.append({"id": 0, "start": offset, "end": offset, "text": text})
