@@ -13,9 +13,11 @@ from rapidfuzz import fuzz
 def _log_gpu_info():
     try:
         out = subprocess.check_output(["nvidia-smi"], text=True)
-        print("[GPU] nvidia-smi available.\n" + out, flush=True)
+        print("[GPU] nvidia-smi available.\n" + out)
     except Exception as e:
-        print(f"[GPU] nvidia-smi not available: {e}", flush=True)
+        print(f"[GPU] nvidia-smi not available: {e}")
+
+
 
 # ----------- Config / Defaults -----------
 DEFAULT_LANGUAGE = os.getenv("TRANSCRIBE_LANG", "en")
@@ -24,35 +26,6 @@ DEFAULT_SPLIT_PHRASE = os.getenv("SPLIT_PHRASE_DEFAULT", "sermon")
 DEFAULT_ANNOUNCEMENTS_PHRASE = os.getenv("ANNOUNCEMENTS_PHRASE_DEFAULT", "")
 
 STORAGE_ROOT = "/runpod-volume"  # RunPod NAS mount
-
-# --- S3 config (optional but recommended) ---
-AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
-AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
-S3_PREFIX_BASE = os.getenv("S3_PREFIX_BASE", "jobs")
-PRESIGN_TTL = int(os.getenv("PRESIGN_TTL", "86400"))
-
-def _s3_client():
-    try:
-        import boto3
-        from botocore.client import Config
-        return boto3.client("s3", region_name=AWS_REGION, config=Config(s3={"addressing_style":"virtual"}))
-    except Exception:
-        return None
-
-def s3_upload_and_presign(path: str, job_id: str, subdir: str) -> Optional[Dict[str, str]]:
-    if not AWS_S3_BUCKET or not os.path.exists(path):
-        return None
-    s3 = _s3_client()
-    if not s3:
-        return None
-    key = f"{S3_PREFIX_BASE}/{job_id}/{subdir}/{os.path.basename(path)}"
-    s3.upload_file(path, AWS_S3_BUCKET, key)
-    url = s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": AWS_S3_BUCKET, "Key": key},
-        ExpiresIn=PRESIGN_TTL
-    )
-    return {"bucket": AWS_S3_BUCKET, "key": key, "url": url}
 
 # ----------- Utilities -----------
 def ensure_dir(path: str):
@@ -106,10 +79,14 @@ def download_to(path: str, url: str):
 
 # ----------- Transcription -----------
 def do_transcribe(input_path: str, language: str) -> Dict[str, Any]:
+    # import here so the module loads only when needed
     from faster_whisper import WhisperModel
+
+    # pick device automatically
     device = "cuda" if os.getenv("CUDA_VISIBLE_DEVICES") not in (None, "", "-1") else "cpu"
-    compute_type = "float16" if device == "cuda" else "int8"
+    compute_type = "float16" if device == "cuda" else "int8"  # good defaults
     model_size = DEFAULT_MODEL_SIZE
+    print(f"[WHISPER] device={device} compute_type={compute_type} CUDA_VISIBLE_DEVICES={os.getenv("CUDA_VISIBLE_DEVICES")}", flush=True)
 
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
     segments_it, _info = model.transcribe(
@@ -179,10 +156,11 @@ def find_phrase_time(segments: List[Dict[str, Any]], phrase: str, min_ratio: flo
 
 # ----------- Main Handler -----------
 def handler(event: Dict[str, Any]) -> Dict[str, Any]:
+    _log_gpu_info()
     """
     Input:
       {
-        "job_id": "...",
+        "job_id": "20250911-120000-abc123-video42",
         "local_video_path": "/runpod-volume/{job_id}/raw/full.mp4",  # optional
         "input_url": "https://....mp4",                        # optional
         "language": "en",                                      # optional
@@ -202,10 +180,12 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     split_phrase = inp.get("split_phrase") or DEFAULT_SPLIT_PHRASE
     announcements_phrase = inp.get("announcements_phrase") or DEFAULT_ANNOUNCEMENTS_PHRASE
 
+    # Ensure dirs
     ensure_dir(storage_path(job_id, "raw"))
     ensure_dir(storage_path(job_id, "transcripts"))
     ensure_dir(storage_path(job_id, "splits"))
 
+    # Download if input_url provided
     if input_url:
         download_to(local_video_path, input_url)
 
@@ -215,15 +195,6 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
     # 1) Transcribe
     tr_data = do_transcribe(local_video_path, language=language)
     tr_paths = write_transcripts(job_id, tr_data)
-
-    # Optional S3 upload of transcripts
-    urls = {"transcripts": {}}
-    up = s3_upload_and_presign(tr_paths["text"], job_id, "transcripts")
-    if up: urls["transcripts"]["text_url"] = up["url"]
-    up = s3_upload_and_presign(tr_paths["json"], job_id, "transcripts")
-    if up: urls["transcripts"]["json_url"] = up["url"]
-    up = s3_upload_and_presign(tr_paths["timestamped"], job_id, "transcripts")
-    if up: urls["transcripts"]["timestamped_url"] = up["url"]
 
     # 2) Split points
     segments = tr_data["segments"]
@@ -242,15 +213,19 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         if sermon_start is not None and sermon_start > 1.0:
+            # worship: [0, sermon_start]
             ffmpeg_cut(local_video_path, worship_out, ss=0.0, to=sermon_start)
             created.append("worship.mp4")
 
             if ann_start is not None and (ann_start > sermon_start + 1.0) and (ann_start < duration - 1.0):
+                # sermon: [sermon_start, ann_start]
                 ffmpeg_cut(local_video_path, sermon_out, ss=sermon_start, to=ann_start)
                 created.append("sermon.mp4")
+                # announcements: [ann_start, end]
                 ffmpeg_cut(local_video_path, announcements_out, ss=ann_start, to=None)
                 created.append("announcements.mp4")
             else:
+                # sermon: [sermon_start, end]
                 ffmpeg_cut(local_video_path, sermon_out, ss=sermon_start, to=None)
                 created.append("sermon.mp4")
         else:
@@ -267,7 +242,6 @@ def handler(event: Dict[str, Any]) -> Dict[str, Any]:
             "transcripts": tr_paths,
             "splits_dir": splits_dir
         },
-        "urls": urls,  # <-- presigned URLs here if AWS_S3_BUCKET is set
         "times": {
             "sermon_start": sermon_start,
             "announcements_start": ann_start,
@@ -282,3 +256,4 @@ runpod.serverless.start({"handler": handler})
 
 # Log GPU info at import
 _log_gpu_info()
+
